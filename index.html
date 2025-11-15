@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flappy Bird Clone</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Arial', sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 20px;
+        }
+
+        #gameContainer {
+            position: relative;
+            background: #fff;
+            border-radius: 10px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+            padding: 20px;
+        }
+
+        #gameCanvas {
+            display: block;
+            border: 2px solid #333;
+            background: #87CEEB;
+        }
+
+        #controls {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            margin-top: 15px;
+            flex-wrap: wrap;
+        }
+
+        button {
+            padding: 12px 24px;
+            font-size: 16px;
+            font-weight: bold;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: all 0.3s;
+            text-transform: uppercase;
+        }
+
+        button:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        }
+
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        #startBtn {
+            background: #4CAF50;
+            color: white;
+        }
+
+        #reGameBtn {
+            background: #FF9800;
+            color: white;
+        }
+
+        #muteBtn {
+            background: #2196F3;
+            color: white;
+        }
+
+        #hud {
+            position: absolute;
+            top: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 5px;
+            font-size: 18px;
+            font-weight: bold;
+            z-index: 10;
+            display: flex;
+            gap: 20px;
+        }
+
+        #gameOverlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.75);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 100;
+            animation: fadeIn 0.3s ease-in;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        #gameOverCard {
+            background: white;
+            padding: 40px;
+            border-radius: 15px;
+            text-align: center;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+            min-width: 300px;
+        }
+
+        #gameOverCard h2 {
+            font-size: 36px;
+            color: #e74c3c;
+            margin-bottom: 20px;
+        }
+
+        #gameOverCard .score-display {
+            font-size: 24px;
+            margin: 15px 0;
+            color: #333;
+        }
+
+        #countdownText {
+            font-size: 14px;
+            color: #666;
+            margin-top: 10px;
+            min-height: 20px;
+        }
+
+        #readyScreen {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            color: white;
+            font-size: 32px;
+            font-weight: bold;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+            z-index: 5;
+        }
+    </style>
+</head>
+<body>
+    <div id="gameContainer">
+        <div id="hud">
+            <span>Score: <span id="scoreDisplay">0</span></span>
+            <span>Pillars Passed: <span id="pillarsDisplay">0</span></span>
+        </div>
+        <div id="readyScreen">Click Start to Play!</div>
+        <canvas id="gameCanvas" width="800" height="600"></canvas>
+        <div id="gameOverlay">
+            <div id="gameOverCard">
+                <h2>Game Over</h2>
+                <div class="score-display">Final Score: <span id="finalScore">0</span></div>
+                <div class="score-display">Pillars Passed: <span id="finalPillars">0</span></div>
+                <button id="reGameBtn" disabled>Re-Game</button>
+                <div id="countdownText"></div>
+            </div>
+        </div>
+        <div id="controls">
+            <button id="startBtn">Start</button>
+            <button id="muteBtn">Mute</button>
+        </div>
+    </div>
+
+    <script>
+        // Game constants
+        const CANVAS_WIDTH = 800;
+        const CANVAS_HEIGHT = 600;
+        const GRAVITY = 0.5;
+        const JUMP_STRENGTH = -8;
+        const PILLAR_SPEED = 3;
+        const PILLAR_SPAWN_INTERVAL = 2000; // milliseconds
+        const PILLAR_GAP = 200;
+        const BIRD_START_X = 150;
+        const BIRD_START_Y = 300;
+        const GAMEOVER_DELAY = 5000; // 5 seconds
+
+        // Game state
+        let gameState = 'idle'; // idle, running, gameover, restarting
+        let score = 0;
+        let pillarsPassed = 0;
+        let isMuted = false;
+        let gameOverTimer = null;
+        let countdownInterval = null;
+        let lastPillarSpawn = 0;
+        let userInteracted = false;
+
+        // Canvas setup
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // Game objects
+        const bird = {
+            x: BIRD_START_X,
+            y: BIRD_START_Y,
+            width: 75,
+            height: 75,
+            velocity: 0,
+            image: null
+        };
+
+        const pillars = [];
+        let backgroundImage = null;
+        let pillarImage = null;
+        let gameoverAudio = null;
+
+        // UI elements
+        const startBtn = document.getElementById('startBtn');
+        const reGameBtn = document.getElementById('reGameBtn');
+        const muteBtn = document.getElementById('muteBtn');
+        const gameOverlay = document.getElementById('gameOverlay');
+        const readyScreen = document.getElementById('readyScreen');
+        const scoreDisplay = document.getElementById('scoreDisplay');
+        const pillarsDisplay = document.getElementById('pillarsDisplay');
+        const finalScore = document.getElementById('finalScore');
+        const finalPillars = document.getElementById('finalPillars');
+        const countdownText = document.getElementById('countdownText');
+
+        // Load images
+        function loadImages() {
+            return new Promise((resolve, reject) => {
+                let loaded = 0;
+                const total = 3;
+
+                const checkComplete = () => {
+                    loaded++;
+                    if (loaded === total) resolve();
+                };
+
+                // Load bird
+                bird.image = new Image();
+                bird.image.onload = checkComplete;
+                bird.image.onerror = () => {
+                    console.warn('bird.jpg not found, using rectangle');
+                    checkComplete();
+                };
+                bird.image.src = 'pictures/bird.jpg';
+
+                // Load pillar
+                pillarImage = new Image();
+                pillarImage.onload = checkComplete;
+                pillarImage.onerror = () => {
+                    console.warn('Piller.jpeg not found, using rectangle');
+                    checkComplete();
+                };
+                pillarImage.src = 'pictures/Piller.jpeg';
+
+                // Load background (optional)
+                backgroundImage = new Image();
+                backgroundImage.onload = checkComplete;
+                backgroundImage.onerror = () => {
+                    console.warn('background.jpg not found, using sky color');
+                    checkComplete();
+                };
+                backgroundImage.src = 'pictures/background.jpg';
+            });
+        }
+
+        // Load audio
+        function loadAudio() {
+            gameoverAudio = new Audio('pictures/Gameover.mp3');
+            gameoverAudio.onerror = () => {
+                console.warn('Gameover.mp3 not found or failed to load');
+            };
+        }
+
+        // Initialize game
+        async function init() {
+            await loadImages();
+            loadAudio();
+            setupEventListeners();
+            draw();
+        }
+
+        // Event listeners
+        function setupEventListeners() {
+            // Start button
+            startBtn.addEventListener('click', startGame);
+            startBtn.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' && gameState === 'idle') startGame();
+            });
+
+            // Re-Game button
+            reGameBtn.addEventListener('click', restartGame);
+            reGameBtn.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' && !reGameBtn.disabled) restartGame();
+            });
+
+            // Mute button
+            muteBtn.addEventListener('click', toggleMute);
+
+            // Flap controls
+            canvas.addEventListener('click', handleFlap);
+            canvas.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                handleFlap();
+            });
+
+            document.addEventListener('keydown', (e) => {
+                if (e.code === 'Space' && gameState === 'running') {
+                    e.preventDefault();
+                    handleFlap();
+                }
+            });
+
+            // Mark user interaction for audio
+            document.addEventListener('click', () => {
+                if (!userInteracted) {
+                    userInteracted = true;
+                }
+            });
+        }
+
+        // Start game
+        function startGame() {
+            if (gameState !== 'idle') return;
+            
+            gameState = 'running';
+            startBtn.disabled = true;
+            readyScreen.style.display = 'none';
+            lastPillarSpawn = Date.now();
+            gameLoop();
+        }
+
+        // Handle flap
+        function handleFlap() {
+            if (gameState === 'running') {
+                bird.velocity = JUMP_STRENGTH;
+            }
+        }
+
+        // Create new pillar pair
+        function createPillar() {
+            const gapY = Math.random() * (CANVAS_HEIGHT - PILLAR_GAP - 200) + 100;
+            const pillarWidth = 80;
+
+            pillars.push({
+                x: CANVAS_WIDTH,
+                topHeight: gapY,
+                bottomY: gapY + PILLAR_GAP,
+                bottomHeight: CANVAS_HEIGHT - (gapY + PILLAR_GAP),
+                width: pillarWidth,
+                passed: false
+            });
+        }
+
+        // Update game logic
+        function update() {
+            if (gameState !== 'running') return;
+
+            // Update bird
+            bird.velocity += GRAVITY;
+            bird.y += bird.velocity;
+
+            // Spawn pillars
+            const now = Date.now();
+            if (now - lastPillarSpawn > PILLAR_SPAWN_INTERVAL) {
+                createPillar();
+                lastPillarSpawn = now;
+            }
+
+            // Update pillars
+            for (let i = pillars.length - 1; i >= 0; i--) {
+                const pillar = pillars[i];
+                pillar.x -= PILLAR_SPEED;
+
+                // Check if bird passed pillar
+                if (!pillar.passed && bird.x > pillar.x + pillar.width) {
+                    pillar.passed = true;
+                    score += 10;
+                    pillarsPassed++;
+                    scoreDisplay.textContent = score;
+                    pillarsDisplay.textContent = pillarsPassed;
+                }
+
+                // Remove off-screen pillars
+                if (pillar.x + pillar.width < 0) {
+                    pillars.splice(i, 1);
+                }
+            }
+
+            // Check collisions
+            if (checkCollision()) {
+                triggerGameOver();
+            }
+        }
+
+        // Check collision
+        function checkCollision() {
+            // Ground/ceiling collision
+            if (bird.y + bird.height > CANVAS_HEIGHT || bird.y < 0) {
+                return true;
+            }
+
+            // Pillar collision
+            for (const pillar of pillars) {
+                if (bird.x < pillar.x + pillar.width &&
+                    bird.x + bird.width > pillar.x) {
+                    if (bird.y < pillar.topHeight ||
+                        bird.y + bird.height > pillar.bottomY) {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        // Trigger game over
+        function triggerGameOver() {
+            gameState = 'gameover';
+            
+            // Show overlay
+            gameOverlay.style.display = 'flex';
+            finalScore.textContent = score;
+            finalPillars.textContent = pillarsPassed;
+            
+            // Disable Re-Game button
+            reGameBtn.disabled = true;
+            countdownText.textContent = '';
+
+            // Play game over audio
+            if (!isMuted && userInteracted && gameoverAudio) {
+                try {
+                    gameoverAudio.currentTime = 0;
+                    gameoverAudio.play().catch(err => {
+                        console.warn('Audio playback blocked:', err);
+                    });
+                } catch (err) {
+                    console.warn('Audio error:', err);
+                }
+            }
+
+            // Start 5-second timer
+            let timeLeft = 5;
+            countdownText.textContent = `Re-Game available in ${timeLeft}s`;
+
+            countdownInterval = setInterval(() => {
+                timeLeft--;
+                if (timeLeft > 0) {
+                    countdownText.textContent = `Re-Game available in ${timeLeft}s`;
+                } else {
+                    clearInterval(countdownInterval);
+                    countdownText.textContent = '';
+                    reGameBtn.disabled = false;
+                }
+            }, 1000);
+
+            // Fallback: ensure button is enabled after 5 seconds
+            gameOverTimer = setTimeout(() => {
+                if (reGameBtn.disabled) {
+                    clearInterval(countdownInterval);
+                    countdownText.textContent = '';
+                    reGameBtn.disabled = false;
+                }
+            }, GAMEOVER_DELAY);
+        }
+
+        // Restart game
+        function restartGame() {
+            if (reGameBtn.disabled || gameState !== 'gameover') return;
+
+            gameState = 'restarting';
+
+            // Stop audio
+            if (gameoverAudio) {
+                gameoverAudio.pause();
+                gameoverAudio.currentTime = 0;
+            }
+
+            // Clear timers
+            if (gameOverTimer) {
+                clearTimeout(gameOverTimer);
+                gameOverTimer = null;
+            }
+            if (countdownInterval) {
+                clearInterval(countdownInterval);
+                countdownInterval = null;
+            }
+
+            // Reset game state
+            score = 0;
+            pillarsPassed = 0;
+            pillars.length = 0;
+            bird.x = BIRD_START_X;
+            bird.y = BIRD_START_Y;
+            bird.velocity = 0;
+            lastPillarSpawn = 0;
+
+            // Update UI
+            scoreDisplay.textContent = score;
+            pillarsDisplay.textContent = pillarsPassed;
+            gameOverlay.style.display = 'none';
+            reGameBtn.disabled = true;
+            countdownText.textContent = '';
+
+            // Transition to idle
+            gameState = 'idle';
+            startBtn.disabled = false;
+            readyScreen.style.display = 'block';
+        }
+
+        // Toggle mute
+        function toggleMute() {
+            isMuted = !isMuted;
+            muteBtn.textContent = isMuted ? 'Unmute' : 'Mute';
+            
+            if (isMuted && gameoverAudio) {
+                gameoverAudio.pause();
+            }
+        }
+
+        // Draw game
+        function draw() {
+            // Clear canvas
+            ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+            // Draw background
+            if (backgroundImage && backgroundImage.complete && backgroundImage.naturalWidth > 0) {
+                ctx.drawImage(backgroundImage, 0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+            } else {
+                // Fallback sky color
+                ctx.fillStyle = '#87CEEB';
+                ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+            }
+
+            if (gameState === 'running' || gameState === 'gameover') {
+                // Draw pillars
+                for (const pillar of pillars) {
+                    if (pillarImage && pillarImage.complete && pillarImage.naturalWidth > 0) {
+                        // Draw top pillar
+                        ctx.drawImage(
+                            pillarImage,
+                            pillar.x, 0,
+                            pillar.width, pillar.topHeight
+                        );
+                        // Draw bottom pillar
+                        ctx.drawImage(
+                            pillarImage,
+                            pillar.x, pillar.bottomY,
+                            pillar.width, pillar.bottomHeight
+                        );
+                    } else {
+                        // Fallback rectangles
+                        ctx.fillStyle = '#2ecc71';
+                        ctx.fillRect(pillar.x, 0, pillar.width, pillar.topHeight);
+                        ctx.fillRect(pillar.x, pillar.bottomY, pillar.width, pillar.bottomHeight);
+                    }
+                }
+
+                // Draw bird
+                if (bird.image && bird.image.complete && bird.image.naturalWidth > 0) {
+                    ctx.drawImage(bird.image, bird.x, bird.y, bird.width, bird.height);
+                } else {
+                    // Fallback rectangle
+                    ctx.fillStyle = '#f39c12';
+                    ctx.fillRect(bird.x, bird.y, bird.width, bird.height);
+                }
+            }
+
+            requestAnimationFrame(draw);
+        }
+
+        // Game loop
+        function gameLoop() {
+            if (gameState === 'running') {
+                update();
+                requestAnimationFrame(gameLoop);
+            }
+        }
+
+        // Initialize on load
+        window.addEventListener('load', init);
+    </script>
+</body>
+</html>
+
